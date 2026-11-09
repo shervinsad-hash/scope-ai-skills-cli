@@ -1,12 +1,14 @@
-"""Install selected skills and linked docs while preserving repository-relative paths."""
+"""Install selected skills and declared dependencies, not entire linked-document graphs."""
 import hashlib
 import json
 import posixpath
 import re
+from importlib.resources import files as resource_files
 from pathlib import Path, PurePosixPath
 from .source import SourceError, discover
 
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
+DECLARATION = "skill_dependencies.json"
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -23,7 +25,30 @@ def load_lock(workspace):
         raise ValueError("Unsupported lock file")
     return data
 
-def dependencies(path, content, tree):
+def manifest_rules(skill, manifest=None):
+    """Use the packaged manifest, or an explicit manifest in offline tests."""
+    if manifest is None:
+        manifest = json.loads(resource_files("scopeai_skills").joinpath(DECLARATION).read_text(encoding="utf-8"))
+    if manifest.get("manifest_version") != "1.0":
+        raise SourceError("Unsupported skill dependency manifest")
+    rules = manifest.get("skills", {}).get(skill)
+    if rules is None:
+        # Unknown skills are safely discoverable but have no inferred dependencies.
+        return {"required": [], "optional": [], "references": []}, True
+    for field in ("required", "optional", "references"):
+        if not isinstance(rules.get(field, []), list) or any(not isinstance(p, str) for p in rules.get(field, [])):
+            raise SourceError(f"Invalid {field} dependency declaration for {skill}")
+    return rules, False
+
+def safe_path(path):
+    if not path or path.startswith("/") or "\\" in path or ".." in PurePosixPath(path).parts:
+        raise SourceError(f"Unsafe dependency path: {path}")
+    if str(PurePosixPath(path)) != path:
+        raise SourceError(f"Noncanonical dependency path: {path}")
+    return path
+
+def linked_references(path, content):
+    """Inspect only top-level skill links for diagnostics, never recursively install them."""
     found = set()
     for url in LINK_RE.findall(content.decode("utf-8", errors="replace")):
         target = url.split("#", 1)[0].split("?", 1)[0].strip()
@@ -31,37 +56,47 @@ def dependencies(path, content, tree):
             continue
         resolved = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
         if resolved.startswith("../") or resolved == "..":
-            raise SourceError(f"Linked reference escapes repository: {path} -> {url}")
-        if resolved in tree and resolved.endswith((".md", ".yaml", ".yml")):
-            found.add(resolved)
+            found.add(("unsafe", resolved))
         elif resolved.endswith((".md", ".yaml", ".yml")):
-            raise SourceError(f"Missing linked reference: {path} -> {resolved}")
+            found.add(("reference", resolved))
     return found
 
-def collect(source, skill, revision, tree):
+def collect(source, skill, revision, tree, manifest=None):
     paths = discover(tree)
     if skill not in paths:
         raise SourceError(f"Unknown skill '{skill}'. Available: {', '.join(paths)}")
-    queue = [paths[skill]]
-    files = {}
-    while queue:
-        name = queue.pop()
-        if name in files:
-            continue
-        if name not in tree or name.startswith("/") or "\\" in name or ".." in PurePosixPath(name).parts:
-            raise SourceError(f"Unsafe or missing file: {name}")
-        data = source.read(tree[name])
-        files[name] = data
-        queue.extend(dependencies(name, data, tree) - files.keys())
-    return files, paths[skill]
+    rules, undeclared = manifest_rules(skill, manifest)
+    entry = safe_path(paths[skill])
+    files = {entry: source.read(tree[entry])}
+    warnings = []
+    if undeclared:
+        warnings.append(f"No dependency declaration for {skill}; installing SKILL.md only")
+    for kind in ("required", "optional", "references"):
+        for name in rules.get(kind, []):
+            name = safe_path(name)
+            if name not in tree:
+                if kind == "required":
+                    raise SourceError(f"Missing required dependency for {skill}: {name}")
+                warnings.append(f"Missing {kind} dependency: {name}")
+                continue
+            if kind != "references":
+                files[name] = source.read(tree[name])
+    # Linked Markdown documents are references, not dependency declarations.
+    # Do not recurse: a broken link three documents away must not block a skill.
+    for kind, name in sorted(linked_references(entry, files[entry])):
+        if kind == "unsafe":
+            warnings.append(f"Unsafe reference link (not followed): {name}")
+        elif name not in tree:
+            warnings.append(f"Broken reference link (not required): {name}")
+    return files, entry, sorted(set(warnings))
 
-def prepare(workspace, skill, source, revision=None):
+def prepare(workspace, skill, source, revision=None, manifest=None):
     lock = load_lock(workspace)
     if lock["repository"] not in (None, source.repository):
         raise SourceError("Workspace points to a different source repository")
     rev = revision or source.revision()
     tree = source.tree(rev)
-    files, entry = collect(source, skill, rev, tree)
+    files, entry, warnings = collect(source, skill, rev, tree, manifest)
     for path, data in files.items():
         dest = root(workspace) / "knowledge" / Path(*PurePosixPath(path).parts)
         if dest.is_symlink():
@@ -74,11 +109,11 @@ def prepare(workspace, skill, source, revision=None):
         previous = next((value for _, value in references), None)
         if previous is None or digest(dest.read_bytes()) != previous:
             raise SourceError(f"Unmanaged or locally modified file: {dest}")
-    return rev, files, entry
+    return rev, files, entry, warnings
 
-def install(workspace, skill, source, apply=False, revision=None):
-    rev, files, entry = prepare(workspace, skill, source, revision)
-    result = {"skill": skill, "revision": rev, "files": sorted(files), "applied": False}
+def install(workspace, skill, source, apply=False, revision=None, manifest=None):
+    rev, files, entry, warnings = prepare(workspace, skill, source, revision, manifest)
+    result = {"skill": skill, "revision": rev, "files": sorted(files), "warnings": warnings, "applied": False}
     if not apply:
         return result
     base = root(workspace)
