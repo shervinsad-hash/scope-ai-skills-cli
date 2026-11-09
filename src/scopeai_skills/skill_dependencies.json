@@ -1,0 +1,15 @@
+{
+  "manifest_version": "1.0",
+  "skills": {
+    "implementation-work-package": {
+      "required": ["skills/contracts/implementation-work-package.yaml"],
+      "optional": [],
+      "references": []
+    },
+    "implementation-planning": {
+      "required": ["skills/contracts/implementation-work-package.yaml"],
+      "optional": [],
+      "references": []
+    }
+  }
+}
