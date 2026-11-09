@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Scope AI session skill feedback",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "records"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0"
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "recorded_at",
+          "skill_id",
+          "skill_revision",
+          "project",
+          "session_id",
+          "objective",
+          "result",
+          "category",
+          "expected",
+          "observed",
+          "evidence_refs",
+          "improvement",
+          "review_status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "skill_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "skill_revision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "project": {
+            "type": "string",
+            "minLength": 1
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "objective": {
+            "type": "string",
+            "minLength": 1
+          },
+          "result": {
+            "enum": [
+              "success",
+              "partial",
+              "failure",
+              "not-tested"
+            ]
+          },
+          "category": {
+            "enum": [
+              "completeness",
+              "correctness",
+              "clarity",
+              "security",
+              "cost",
+              "performance",
+              "usability",
+              "other"
+            ]
+          },
+          "expected": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observed": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "improvement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "review_status": {
+            "enum": [
+              "proposed",
+              "reviewed",
+              "accepted",
+              "rejected"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

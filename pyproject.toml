@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scopeai-skills-cli"
+version = "0.1.0"
+description = "Project-independent distribution and feedback for Scope AI skills"
+requires-python = ">=3.10"
+readme = "README.md"
+
+[project.scripts]
+scopeai = "scopeai_skills.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
